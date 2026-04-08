@@ -1,0 +1,120 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>三角洲行动改枪码</title>
+  <meta
+    name="description"
+    content="三角洲行动改枪码查询站，支持搜索、枪械筛选、来源筛选、预算筛选与一键复制。"
+  >
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="bg-scene" aria-hidden="true">
+    <video class="bg-video" autoplay muted loop playsinline>
+      <source src="./bg-anime.mp4" type="video/mp4">
+    </video>
+    <div class="bg-video-overlay"></div>
+    <div class="bg-orb bg-orb-a"></div>
+    <div class="bg-orb bg-orb-b"></div>
+    <div class="bg-grid"></div>
+    <div class="bg-glow"></div>
+  </div>
+
+  <div class="page-shell">
+    <header class="hero">
+      <div class="hero-panel hero-panel-wide">
+        <div class="hero-card hero-card-feature hero-card-status">
+          <strong id="syncDate">读取中</strong>
+          <small>步枪数据</small>
+        </div>
+        <div class="hero-grid" id="heroStats"></div>
+        <div class="hero-actions">
+          <button class="button button-secondary" type="button" id="randomPick">随机</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="section section-codes" id="codes">
+        <div class="section-top">
+          <button class="ghost-button" id="clearFilters" type="button">清空筛选</button>
+        </div>
+
+        <div class="control-shell">
+          <div class="control-bar">
+            <label class="search">
+              <span>关键词</span>
+              <input id="searchInput" type="search" placeholder="枪名 / 描述 / 改枪码">
+            </label>
+
+            <label class="select">
+              <span>武器</span>
+              <div class="custom-select" id="weaponSelect"></div>
+            </label>
+
+            <label class="select">
+              <span>来源</span>
+              <div class="custom-select" id="sourceSelect"></div>
+            </label>
+          </div>
+
+          <div class="filter-row">
+            <div class="tier-filter" id="tierFilter"></div>
+            <label class="toggle">
+              <input id="includeUnknown" type="checkbox">
+              <span>显示待识别数据</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="content-grid">
+          <aside class="sidebar">
+            <div class="panel">
+              <div class="panel-heading">
+                <span>Top</span>
+              </div>
+              <div id="weaponRanking" class="ranking-list"></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-heading">
+                <span>Budget</span>
+              </div>
+              <div id="budgetAdvice" class="advice-list"></div>
+            </div>
+          </aside>
+
+          <div class="results-column">
+            <div class="results-meta">
+              <p id="resultSummary">正在读取数据...</p>
+            </div>
+            <div id="results" class="card-grid"></div>
+            <div id="emptyState" class="empty-state" hidden>
+              <h3>没有匹配结果</h3>
+              <p>换个关键词，或者清空筛选后再看。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <template id="resultCardTemplate">
+    <article class="result-card">
+      <div class="card-topline">
+        <span class="weapon-name"></span>
+        <span class="price-pill"></span>
+      </div>
+      <h3 class="build-title"></h3>
+      <p class="build-code"></p>
+      <div class="card-actions">
+        <button class="copy-button" type="button">复制改枪码</button>
+      </div>
+    </article>
+  </template>
+
+  <script src="./app.js"></script>
+</body>
+</html>
