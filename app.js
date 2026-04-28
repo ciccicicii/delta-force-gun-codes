@@ -1,4 +1,4 @@
-﻿const DATA_PATH = "./三角洲改枪码_步枪_全网合并.json";
+﻿const DATA_PATH = "/api/data";
 
 const PRICE_TIERS = [
   { id: "all", label: "全部预算", predicate: () => true },
@@ -9,9 +9,20 @@ const PRICE_TIERS = [
   { id: "unknown", label: "价格待补", predicate: (item) => !item.hasPrice }
 ];
 
+const WEAPON_TYPE_OPTIONS = [
+  { id: "all", label: "全部" },
+  { id: "rifle", label: "步枪" },
+  { id: "smg", label: "冲锋枪" },
+  { id: "sniper", label: "狙击枪" },
+  { id: "shotgun", label: "霰弹枪" },
+  { id: "mg", label: "机枪" },
+  { id: "other", label: "其他" }
+];
+
 const state = {
   items: [],
   search: "",
+  weaponType: "all",
   weapon: "all",
   source: "all",
   tier: "all",
@@ -21,7 +32,20 @@ const state = {
 const elements = {
   syncDate: document.querySelector("#syncDate"),
   heroStats: document.querySelector("#heroStats"),
+  openUploadModal: document.querySelector("#openUploadModal"),
+  closeUploadModal: document.querySelector("#closeUploadModal"),
+  uploadModal: document.querySelector("#uploadModal"),
+  uploadModalBackdrop: document.querySelector("#uploadModalBackdrop"),
+  uploadForm: document.querySelector("#uploadForm"),
+  uploadStatus: document.querySelector("#uploadStatus"),
+  uploadReset: document.querySelector("#uploadReset"),
+  uploadWeaponTypeSelect: document.querySelector("#uploadWeaponTypeSelect"),
+  uploadWeaponSelect: document.querySelector("#uploadWeaponSelect"),
+  uploadBuildCode: document.querySelector("#uploadBuildCode"),
+  uploadDescription: document.querySelector("#uploadDescription"),
+  uploadPrice: document.querySelector("#uploadPrice"),
   searchInput: document.querySelector("#searchInput"),
+  weaponTypeFilter: document.querySelector("#weaponTypeFilter"),
   weaponSelect: document.querySelector("#weaponSelect"),
   sourceSelect: document.querySelector("#sourceSelect"),
   includeUnknown: document.querySelector("#includeUnknown"),
@@ -42,20 +66,10 @@ init();
 
 async function init() {
   bindControls();
+  renderUploadWeaponTypeSelect();
   renderTierFilter();
-
-  try {
-    const response = await fetch(DATA_PATH);
-    const rawItems = await response.json();
-    state.items = rawItems.map(normalizeItem).sort((a, b) => a.priceValue - b.priceValue);
-    renderOverview();
-    renderFilters();
-    renderSidebar();
-    renderResults();
-  } catch (error) {
-    elements.resultSummary.textContent = "数据读取失败，请确认 JSON 文件路径可访问。";
-    console.error(error);
-  }
+  renderWeaponTypeFilter();
+  await loadItems();
 }
 
 function bindControls() {
@@ -73,11 +87,13 @@ function bindControls() {
 
   elements.clearFilters.addEventListener("click", () => {
     state.search = "";
+    state.weaponType = "all";
     state.weapon = "all";
     state.source = "all";
     state.tier = "all";
     state.includeUnknown = false;
     elements.searchInput.value = "";
+    syncWeaponTypeButtons();
     setCustomSelectValue("weaponSelect", "all");
     setCustomSelectValue("sourceSelect", "all");
     elements.includeUnknown.checked = false;
@@ -100,11 +116,34 @@ function bindControls() {
     document.querySelector("#codes")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
+  elements.openUploadModal.addEventListener("click", () => {
+    openUploadModal();
+  });
+
+  elements.closeUploadModal.addEventListener("click", () => {
+    closeUploadModal();
+  });
+
+  elements.uploadModalBackdrop.addEventListener("click", () => {
+    closeUploadModal();
+  });
+
+  elements.uploadForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await submitUpload();
+  });
+
+  elements.uploadReset.addEventListener("click", () => {
+    resetUploadForm();
+    setUploadStatus("未提交", false);
+  });
+
   document.addEventListener("click", (event) => {
     Object.values(customSelects).forEach((instance) => {
       if (!instance.root.contains(event.target)) {
         instance.root.classList.remove("open");
         instance.menu.hidden = true;
+        instance.trigger.setAttribute("aria-expanded", "false");
       }
     });
   });
@@ -114,9 +153,30 @@ function bindControls() {
       Object.values(customSelects).forEach((instance) => {
         instance.root.classList.remove("open");
         instance.menu.hidden = true;
+        instance.trigger.setAttribute("aria-expanded", "false");
       });
+      closeUploadModal();
     }
   });
+}
+
+async function loadItems() {
+  try {
+    const response = await fetch(DATA_PATH, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const rawItems = await response.json();
+    state.items = rawItems.map(normalizeItem).sort((a, b) => a.priceValue - b.priceValue);
+    renderOverview();
+    renderFilters();
+    renderUploadWeaponSelect();
+    renderSidebar();
+    renderResults();
+  } catch (error) {
+    elements.resultSummary.textContent = "数据读取失败，请确认本地服务已启动。";
+    console.error(error);
+  }
 }
 
 function normalizeItem(item) {
@@ -125,16 +185,25 @@ function normalizeItem(item) {
   const description = String(item["改装描述"] || "无描述").trim();
   const rawWeaponName = String(item["枪械名称"] || "未知武器").trim();
   const source = String(item["来源"] || "aitags").trim();
+  const reviewStatus = String(item["审核状态"] || (source === "user_upload" ? "pending" : "approved")).trim();
+  const itemId = String(item["ID"] || buildItemId(rawWeaponName, String(item["改枪码"] || "").trim(), source)).trim();
   const isUnknownWeapon = rawWeaponName === "待识别" || rawWeaponName === "待识别 其他" || rawWeaponName === "待识别/其他";
+  const weaponType = String(item["武器大类"] || "").trim() || detectWeaponType(rawWeaponName);
+  const canonicalWeaponName = isUnknownWeapon ? "待识别/其他" : canonicalizeWeaponName(rawWeaponName);
 
   return {
-    weaponName: isUnknownWeapon ? "待识别/其他" : rawWeaponName,
+    id: itemId,
+    weaponName: canonicalWeaponName,
+    rawWeaponName,
+    weaponType,
     buildCode: String(item["改枪码"] || "").trim(),
     description: description === "无描述" ? "通用方案" : description,
     priceLabel: priceValue ? `${priceValue}万` : "价格待补",
     priceValue,
     hasPrice: priceValue > 0,
     source,
+    reviewStatus,
+    isUserUpload: source === "user_upload",
     isUnknownWeapon
   };
 }
@@ -175,6 +244,58 @@ function renderOverview() {
 function renderFilters() {
   populateWeaponOptions();
   populateSourceOptions();
+}
+
+function renderUploadWeaponTypeSelect() {
+  const options = WEAPON_TYPE_OPTIONS.filter((type) => type.id !== "all").map((type) => ({ value: type.id, label: type.label }));
+  createOrUpdateCustomSelect("uploadWeaponTypeSelect", options, "rifle", (value) => {
+    elements.uploadWeaponTypeSelect.dataset.value = value;
+    renderUploadWeaponSelect(value);
+  });
+  elements.uploadWeaponTypeSelect.dataset.value = "rifle";
+}
+
+function renderUploadWeaponSelect(weaponType = elements.uploadWeaponTypeSelect.dataset.value || "rifle") {
+  const weapons = [...new Set(state.items.filter((item) => item.weaponType === weaponType && !item.isUnknownWeapon).map((item) => item.weaponName))]
+    .sort((a, b) => a.localeCompare(b, "zh-CN"));
+
+  const options = weapons.map((weapon) => ({ value: weapon, label: weapon }));
+  const selectedValue = options[0]?.value || "";
+
+  createOrUpdateCustomSelect("uploadWeaponSelect", options, selectedValue, (value) => {
+    elements.uploadWeaponSelect.dataset.value = value;
+  });
+
+  elements.uploadWeaponSelect.dataset.value = selectedValue;
+}
+
+function renderWeaponTypeFilter() {
+  elements.weaponTypeFilter.innerHTML = WEAPON_TYPE_OPTIONS
+    .map(
+      (type) => `
+        <button class="type-chip ${type.id === state.weaponType ? "active" : ""}" type="button" data-type="${type.id}">
+          ${type.label}
+        </button>
+      `
+    )
+    .join("");
+
+  elements.weaponTypeFilter.querySelectorAll("[data-type]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.weaponType = button.dataset.type;
+      state.weapon = "all";
+      syncWeaponTypeButtons();
+      populateWeaponOptions();
+      renderSidebar();
+      renderResults();
+    });
+  });
+}
+
+function syncWeaponTypeButtons() {
+  elements.weaponTypeFilter.querySelectorAll("[data-type]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.type === state.weaponType);
+  });
 }
 
 function populateWeaponOptions() {
@@ -270,16 +391,34 @@ function renderResults() {
   filtered.forEach((item) => {
     const fragment = elements.template.content.cloneNode(true);
     fragment.querySelector(".weapon-name").textContent = item.weaponName;
+
+    const statusPill = fragment.querySelector(".status-pill");
+    statusPill.textContent = formatReviewStatus(item.reviewStatus);
+    statusPill.classList.toggle("pending", item.reviewStatus === "pending");
+
     const pricePill = fragment.querySelector(".price-pill");
     pricePill.textContent = item.priceLabel;
     pricePill.classList.toggle("unknown", !item.hasPrice);
+
     fragment.querySelector(".build-title").textContent = item.description;
     fragment.querySelector(".build-code").textContent = item.buildCode;
 
+    const meta = fragment.querySelector(".card-meta");
     const sourcePill = document.createElement("span");
     sourcePill.className = "source-pill";
     sourcePill.textContent = formatSourceLabel(item.source);
-    fragment.querySelector(".result-card").appendChild(sourcePill);
+    meta.appendChild(sourcePill);
+
+    if (item.isUserUpload) {
+      const deleteButton = document.createElement("button");
+      deleteButton.className = "delete-button";
+      deleteButton.type = "button";
+      deleteButton.textContent = "删除上传";
+      deleteButton.addEventListener("click", async () => {
+        await deleteUserUpload(item.id);
+      });
+      meta.appendChild(deleteButton);
+    }
 
     const copyButton = fragment.querySelector(".copy-button");
     copyButton.addEventListener("click", async () => {
@@ -299,20 +438,22 @@ function renderResults() {
 function getFilteredItems() {
   return state.items.filter((item) => {
     const visibleByKnownState = state.includeUnknown || !item.isUnknownWeapon;
+    const matchesWeaponType = state.weaponType === "all" || item.weaponType === state.weaponType;
     const matchesWeapon = state.weapon === "all" || item.weaponName === state.weapon;
     const matchesSource = state.source === "all" || item.source === state.source;
     const matchesTier = PRICE_TIERS.find((tier) => tier.id === state.tier)?.predicate(item) ?? true;
-    const haystack = `${item.weaponName} ${item.description} ${item.buildCode} ${item.source}`.toLowerCase();
+    const haystack = `${item.weaponName} ${item.rawWeaponName} ${item.description} ${item.buildCode} ${item.source}`.toLowerCase();
     const matchesSearch = !state.search || haystack.includes(state.search);
-    return visibleByKnownState && matchesWeapon && matchesSource && matchesTier && matchesSearch;
+    return visibleByKnownState && matchesWeaponType && matchesWeapon && matchesSource && matchesTier && matchesSearch;
   });
 }
 
 function buildSummary(count) {
+  const weaponTypeLabel = WEAPON_TYPE_OPTIONS.find((type) => type.id === state.weaponType)?.label ?? "全部";
   const weaponLabel = state.weapon === "all" ? "全部武器" : state.weapon;
   const sourceLabel = state.source === "all" ? "全部来源" : formatSourceLabel(state.source);
   const tierLabel = PRICE_TIERS.find((tier) => tier.id === state.tier)?.label ?? "全部预算";
-  return `${count} 条结果 · ${weaponLabel} · ${sourceLabel} · ${tierLabel}`;
+  return `${count} 条结果 · ${weaponTypeLabel} · ${weaponLabel} · ${sourceLabel} · ${tierLabel}`;
 }
 
 function groupByWeapon(items) {
@@ -343,16 +484,145 @@ function groupByWeapon(items) {
 }
 
 function getVisibleBaseItems() {
-  return state.items.filter((item) => state.includeUnknown || !item.isUnknownWeapon);
+  return state.items.filter((item) => {
+    const visibleByKnownState = state.includeUnknown || !item.isUnknownWeapon;
+    const matchesWeaponType = state.weaponType === "all" || item.weaponType === state.weaponType;
+    return visibleByKnownState && matchesWeaponType;
+  });
 }
 
 function formatSourceLabel(source) {
   const sourceMap = {
     aitags: "Aitags",
     upx8: "UPX8",
-    "有力氪 官方推荐": "有力氪"
+    "有力氪 官方推荐": "有力氪",
+    user_upload: "用户上传"
   };
   return sourceMap[source] || source;
+}
+
+function formatReviewStatus(reviewStatus) {
+  return reviewStatus === "approved" ? "已收录" : "待审核";
+}
+
+function canonicalizeWeaponName(rawWeaponName) {
+  const aliasMap = {
+    "AK-12突击步枪": "AK-12",
+    "AKM突击步枪": "AKM",
+    "AS Val突击步枪": "AS Val",
+    "ASh-12战斗步枪": "ASh-12",
+    "AUG突击步枪": "AUG",
+    "G3战斗步枪": "G3",
+    "K416突击步枪": "K416",
+    "KC17突击步枪": "KC17",
+    "MCX LT突击步枪": "MCX LT",
+    "M16A4突击步枪": "M16A4",
+    "M7战斗步枪": "M7",
+    "MK47突击步枪": "MK47",
+    "PTR-32突击步枪": "PTR-32",
+    "QBZ95-1突击步枪": "QBZ95-1",
+    "SCAR-H战斗步枪": "SCAR-H"
+  };
+
+  if (aliasMap[rawWeaponName]) {
+    return aliasMap[rawWeaponName];
+  }
+
+  return rawWeaponName
+    .replace(/紧凑突击步枪$/, "")
+    .replace(/突击步枪$/, "")
+    .replace(/战斗步枪$/, "")
+    .replace(/射手步枪$/, "")
+    .replace(/狙击步枪$/, "")
+    .replace(/冲锋枪$/, "")
+    .replace(/霰弹枪$/, "")
+    .replace(/轻机枪$/, "")
+    .replace(/通用机枪$/, "")
+    .trim();
+}
+
+function detectWeaponType(rawWeaponName) {
+  const typeMap = {
+    "AS Val": "rifle",
+    "ASh-12": "rifle",
+    "K416": "rifle",
+    "K437": "rifle",
+    "KC17": "rifle",
+    "AK-12": "rifle",
+    "AKM": "rifle",
+    "AKS-74U": "rifle",
+    "M4A1": "rifle",
+    "CAR-15": "rifle",
+    "QBZ95-1": "rifle",
+    "SCAR-H": "rifle",
+    "SG552": "rifle",
+    "PTR-32": "rifle",
+    "腾龙突击步枪": "rifle",
+    "AUG突击步枪": "rifle",
+    "MCX LT突击步枪": "rifle",
+    "M16A4突击步枪": "rifle",
+    "MK47突击步枪": "rifle",
+    "SR-3M紧凑突击步枪": "rifle",
+    "M7战斗步枪": "rifle",
+    "G3战斗步枪": "rifle",
+    "ASh-12战斗步枪": "rifle",
+    "K416突击步枪": "rifle",
+    "KC17突击步枪": "rifle",
+    "AK-12突击步枪": "rifle",
+    "AKM突击步枪": "rifle",
+    "AS Val突击步枪": "rifle",
+    "PTR-32突击步枪": "rifle",
+    "QBZ95-1突击步枪": "rifle",
+    "SCAR-H战斗步枪": "rifle",
+    "M700狙击步枪": "sniper",
+    "AWM狙击步枪": "sniper",
+    "R93狙击步枪": "sniper",
+    "SVD狙击步枪": "sniper",
+    "M14射手步枪": "sniper",
+    "Mini-14射手步枪": "sniper",
+    "PSG-1射手步枪": "sniper",
+    "SR-25射手步枪": "sniper",
+    "MP5冲锋枪": "smg",
+    "MP7冲锋枪": "smg",
+    "P90冲锋枪": "smg",
+    "SMG-45冲锋枪": "smg",
+    "Vector冲锋枪": "smg",
+    "QCQ171冲锋枪": "smg",
+    "野牛冲锋枪": "smg",
+    "勇士冲锋枪": "smg",
+    "MK4冲锋枪": "smg",
+    "UZI冲锋枪": "smg",
+    "M870霰弹枪": "shotgun",
+    "M1014霰弹枪": "shotgun",
+    "FS-12霰弹枪": "shotgun",
+    "S12K霰弹枪": "shotgun",
+    "725双管霰弹枪": "shotgun",
+    "M249轻机枪": "mg",
+    "QJB201轻机枪": "mg",
+    "PKM通用机枪": "mg"
+  };
+
+  if (typeMap[rawWeaponName]) {
+    return typeMap[rawWeaponName];
+  }
+
+  if (rawWeaponName.includes("冲锋枪")) {
+    return "smg";
+  }
+  if (rawWeaponName.includes("狙击步枪") || rawWeaponName.includes("射手步枪")) {
+    return "sniper";
+  }
+  if (rawWeaponName.includes("霰弹枪")) {
+    return "shotgun";
+  }
+  if (rawWeaponName.includes("轻机枪") || rawWeaponName.includes("通用机枪")) {
+    return "mg";
+  }
+  if (rawWeaponName.includes("步枪")) {
+    return "rifle";
+  }
+
+  return "other";
 }
 
 function createOrUpdateCustomSelect(id, options, selectedValue, onChange) {
@@ -383,6 +653,18 @@ function createOrUpdateCustomSelect(id, options, selectedValue, onChange) {
   } else {
     instance.onChange = onChange;
   }
+
+  if (!options.length) {
+    instance.menu.innerHTML = "";
+    instance.trigger.textContent = "暂无可选项";
+    instance.trigger.setAttribute("aria-expanded", "false");
+    instance.trigger.disabled = true;
+    instance.root.classList.remove("open");
+    instance.menu.hidden = true;
+    return;
+  }
+
+  instance.trigger.disabled = false;
 
   instance.menu.innerHTML = options
     .map(
@@ -429,6 +711,99 @@ function setCustomSelectValue(id, value) {
   });
 }
 
+async function submitUpload() {
+  const weaponType = elements.uploadWeaponTypeSelect.dataset.value || "rifle";
+  const weaponName = elements.uploadWeaponSelect.dataset.value || "";
+  const buildCode = elements.uploadBuildCode.value.trim();
+  const description = elements.uploadDescription.value.trim();
+  const price = elements.uploadPrice.value.trim();
+
+  if (!weaponName || !buildCode) {
+    setUploadStatus("请先选择武器名称并填写改枪码。", true);
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/uploads", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        weaponType,
+        weaponName,
+        buildCode,
+        description,
+        price
+      })
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "上传失败");
+    }
+
+    await loadItems();
+    resetUploadForm();
+    state.search = weaponName.toLowerCase();
+    elements.searchInput.value = weaponName;
+    renderResults();
+    setUploadStatus(`已上传：${weaponName}`, false);
+    closeUploadModal();
+    document.querySelector("#codes")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (error) {
+    setUploadStatus(error.message || "上传失败", true);
+  }
+}
+
+function resetUploadForm() {
+  elements.uploadForm.reset();
+  setCustomSelectValue("uploadWeaponTypeSelect", "rifle");
+  elements.uploadWeaponTypeSelect.dataset.value = "rifle";
+  renderUploadWeaponSelect("rifle");
+}
+
+function setUploadStatus(message, isError) {
+  elements.uploadStatus.textContent = message;
+  elements.uploadStatus.classList.toggle("error", isError);
+}
+
+function openUploadModal() {
+  elements.uploadModal.hidden = false;
+  document.body.classList.add("modal-open");
+}
+
+function closeUploadModal() {
+  elements.uploadModal.hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
+async function deleteUserUpload(itemId) {
+  try {
+    const response = await fetch(`/api/uploads/${encodeURIComponent(itemId)}`, {
+      method: "DELETE"
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "删除失败");
+    }
+    await loadItems();
+  } catch (error) {
+    console.error(error);
+    alert(error.message || "删除失败");
+  }
+}
+
+function buildItemId(weaponName, buildCode, source) {
+  const safeWeaponName = normalizeBuildCode(weaponName).replace(/\s+/g, "-");
+  const safeBuildCode = normalizeBuildCode(buildCode).replace(/\s+/g, "-");
+  return `${source}-${safeWeaponName}-${safeBuildCode}`;
+}
+
+function normalizeBuildCode(buildCode) {
+  return String(buildCode).trim().toLowerCase();
+}
+
 async function copyText(text) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -447,7 +822,7 @@ async function copyText(text) {
 }
 
 function escapeHtml(value) {
-  return value
+  return String(value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")

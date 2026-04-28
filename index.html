@@ -39,10 +39,13 @@
     <main>
       <section class="section section-codes" id="codes">
         <div class="section-top">
+          <button class="button button-secondary" id="openUploadModal" type="button">上传改枪码</button>
           <button class="ghost-button" id="clearFilters" type="button">清空筛选</button>
         </div>
 
         <div class="control-shell">
+          <div class="type-filter-row" id="weaponTypeFilter"></div>
+
           <div class="control-bar">
             <label class="search">
               <span>关键词</span>
@@ -101,14 +104,66 @@
     </main>
   </div>
 
+  <div class="modal-shell" id="uploadModal" hidden>
+    <div class="modal-backdrop" id="uploadModalBackdrop"></div>
+    <section class="modal-panel upload-section" aria-modal="true" aria-labelledby="uploadModalTitle" role="dialog">
+      <div class="upload-head">
+        <div>
+          <h2 class="upload-title" id="uploadModalTitle">上传改枪码</h2>
+          <p class="upload-note">当前版本会直接写入项目 JSON，提交后会立即并入当前列表。</p>
+        </div>
+        <div class="modal-actions">
+          <p class="upload-status" id="uploadStatus">未提交</p>
+          <button class="ghost-button modal-close" id="closeUploadModal" type="button">关闭</button>
+        </div>
+      </div>
+
+      <form class="upload-form" id="uploadForm">
+        <label class="select">
+          <span>武器类别</span>
+          <div class="custom-select" id="uploadWeaponTypeSelect"></div>
+        </label>
+
+        <label class="select">
+          <span>武器名称</span>
+          <div class="custom-select" id="uploadWeaponSelect"></div>
+        </label>
+
+        <label class="search">
+          <span>改枪码</span>
+          <input id="uploadBuildCode" type="text" maxlength="120" placeholder="输入改枪码" required>
+        </label>
+
+        <label class="search">
+          <span>改装描述</span>
+          <input id="uploadDescription" type="text" maxlength="80" placeholder="例如：中距离通用方案">
+        </label>
+
+        <label class="search">
+          <span>价格</span>
+          <input id="uploadPrice" type="text" maxlength="20" placeholder="例如：25万">
+        </label>
+
+        <div class="upload-actions">
+          <button class="button button-primary" type="submit">提交改枪码</button>
+          <button class="ghost-button" id="uploadReset" type="button">清空表单</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
   <template id="resultCardTemplate">
     <article class="result-card">
       <div class="card-topline">
-        <span class="weapon-name"></span>
-        <span class="price-pill"></span>
+        <div class="card-badges">
+          <span class="status-pill"></span>
+          <span class="price-pill"></span>
+        </div>
       </div>
+      <h3 class="weapon-name"></h3>
       <h3 class="build-title"></h3>
       <p class="build-code"></p>
+      <div class="card-meta"></div>
       <div class="card-actions">
         <button class="copy-button" type="button">复制改枪码</button>
       </div>
