@@ -1,4 +1,5 @@
-﻿const DATA_PATH = "/api/data";
+const API_DATA_PATH = "/api/data";
+const STATIC_DATA_PATH = "./三角洲改枪码_步枪_全网合并.json";
 
 const PRICE_TIERS = [
   { id: "all", label: "全部预算", predicate: () => true },
@@ -26,7 +27,9 @@ const state = {
   weapon: "all",
   source: "all",
   tier: "all",
-  includeUnknown: false
+  includeUnknown: false,
+  canWrite: false,
+  dataMode: "static"
 };
 
 const elements = {
@@ -38,6 +41,7 @@ const elements = {
   uploadModalBackdrop: document.querySelector("#uploadModalBackdrop"),
   uploadForm: document.querySelector("#uploadForm"),
   uploadStatus: document.querySelector("#uploadStatus"),
+  uploadNote: document.querySelector("#uploadNote"),
   uploadReset: document.querySelector("#uploadReset"),
   uploadWeaponTypeSelect: document.querySelector("#uploadWeaponTypeSelect"),
   uploadWeaponSelect: document.querySelector("#uploadWeaponSelect"),
@@ -161,13 +165,32 @@ function bindControls() {
 }
 
 async function loadItems() {
+  const dataSources = [
+    { path: API_DATA_PATH, mode: "api" },
+    { path: STATIC_DATA_PATH, mode: "static" }
+  ];
+
   try {
-    const response = await fetch(DATA_PATH, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+    let rawItems = null;
+
+    for (const source of dataSources) {
+      const response = await fetch(source.path, { cache: "no-store" });
+      if (!response.ok) {
+        continue;
+      }
+
+      rawItems = await response.json();
+      state.canWrite = source.mode === "api";
+      state.dataMode = source.mode;
+      break;
     }
-    const rawItems = await response.json();
+
+    if (!rawItems) {
+      throw new Error("无法读取数据源");
+    }
+
     state.items = rawItems.map(normalizeItem).sort((a, b) => a.priceValue - b.priceValue);
+    syncUploadAvailability();
     renderOverview();
     renderFilters();
     renderUploadWeaponSelect();
@@ -175,8 +198,26 @@ async function loadItems() {
     renderResults();
   } catch (error) {
     elements.resultSummary.textContent = "数据读取失败，请确认本地服务已启动。";
+    syncUploadAvailability();
     console.error(error);
   }
+}
+
+function syncUploadAvailability() {
+  if (state.canWrite) {
+    elements.openUploadModal.disabled = false;
+    elements.openUploadModal.title = "";
+    elements.uploadNote.textContent = "当前版本会直接写入项目 JSON，提交后会立即并入当前列表。";
+    if (elements.uploadStatus.textContent === "Pages 公开站点为只读模式，请在本地服务中上传。") {
+      setUploadStatus("未提交", false);
+    }
+    return;
+  }
+
+  elements.openUploadModal.disabled = true;
+  elements.openUploadModal.title = "GitHub Pages 只支持查询，不支持直接写入 JSON。";
+  elements.uploadNote.textContent = "GitHub Pages 为只读模式。要上传改枪码，请在本地运行 server.py 后访问 127.0.0.1:8001。";
+  setUploadStatus("Pages 公开站点为只读模式，请在本地服务中上传。", false);
 }
 
 function normalizeItem(item) {
@@ -409,7 +450,7 @@ function renderResults() {
     sourcePill.textContent = formatSourceLabel(item.source);
     meta.appendChild(sourcePill);
 
-    if (item.isUserUpload) {
+    if (item.isUserUpload && state.canWrite) {
       const deleteButton = document.createElement("button");
       deleteButton.className = "delete-button";
       deleteButton.type = "button";
@@ -712,6 +753,11 @@ function setCustomSelectValue(id, value) {
 }
 
 async function submitUpload() {
+  if (!state.canWrite) {
+    setUploadStatus("当前页面是只读模式，请在本地服务中上传。", true);
+    return;
+  }
+
   const weaponType = elements.uploadWeaponTypeSelect.dataset.value || "rifle";
   const weaponName = elements.uploadWeaponSelect.dataset.value || "";
   const buildCode = elements.uploadBuildCode.value.trim();
@@ -779,6 +825,11 @@ function closeUploadModal() {
 }
 
 async function deleteUserUpload(itemId) {
+  if (!state.canWrite) {
+    alert("当前页面是只读模式，请在本地服务中删除上传内容。");
+    return;
+  }
+
   try {
     const response = await fetch(`/api/uploads/${encodeURIComponent(itemId)}`, {
       method: "DELETE"
